@@ -1,0 +1,246 @@
+// Focus Quest data model.
+// Using SQLite for zero-setup local dev. To move to Postgres/MySQL later,
+// change `provider` + `url` below (Prisma's schema/query API stays the same);
+// the only SQLite-specific concession here is storing small JSON blobs
+// (avatarConfig) as plain strings instead of a native Json column.
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Student {
+  id           String    @id @default(cuid())
+  name         String
+  avatarConfig String    @default("{}")
+  totalXp      Int       @default(0)
+  stars        Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  subjects        Subject[]
+  assignments     Assignment[]
+  focusSessions   FocusSession[]
+  routines        Routine[]
+  reminders       Reminder[]
+  calendarEvents  CalendarEvent[]
+  xpTransactions  XPTransaction[]
+  achievements    StudentAchievement[]
+  checklistItems  ChecklistItem[]
+  brainDumps      BrainDumpEntry[]
+  rewardItems     StudentRewardItem[]
+  activityDays    ActivityDay[]
+}
+
+model Subject {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name      String
+  color     String
+  icon      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  assignments Assignment[]
+
+  @@index([studentId])
+}
+
+model Assignment {
+  id                String    @id @default(cuid())
+  studentId         String
+  student           Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId         String?
+  subject           Subject?  @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  title             String
+  notes             String?
+  dueDate           DateTime?
+  estimatedMinutes  Int?
+  priority          String    @default("medium") // low | medium | high
+  status            String    @default("active") // active | completed
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+
+  steps          AssignmentStep[]
+  focusSessions  FocusSession[]
+  reminders      Reminder[]
+
+  @@index([studentId])
+  @@index([dueDate])
+}
+
+model AssignmentStep {
+  id           String     @id @default(cuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  title        String
+  order        Int
+  completed    Boolean    @default(false)
+  completedAt  DateTime?
+
+  @@index([assignmentId])
+}
+
+model FocusSession {
+  id               String     @id @default(cuid())
+  studentId        String
+  student          Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  assignmentId     String?
+  assignment       Assignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  durationMinutes  Int
+  elapsedSeconds   Int        @default(0)
+  completed        Boolean    @default(false)
+  startedAt        DateTime   @default(now())
+  endedAt          DateTime?
+
+  @@index([studentId])
+}
+
+model Routine {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type      String   // morning | afterschool | evening
+  name      String
+
+  items RoutineItem[]
+
+  @@index([studentId])
+}
+
+model RoutineItem {
+  id        String   @id @default(cuid())
+  routineId String
+  routine   Routine  @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  title     String
+  order     Int
+
+  completions RoutineCompletion[]
+
+  @@index([routineId])
+}
+
+model RoutineCompletion {
+  id            String      @id @default(cuid())
+  routineItemId String
+  routineItem   RoutineItem @relation(fields: [routineItemId], references: [id], onDelete: Cascade)
+  date          String      // YYYY-MM-DD, local day key
+
+  @@unique([routineItemId, date])
+}
+
+model Reminder {
+  id           String     @id @default(cuid())
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  assignmentId String?
+  assignment   Assignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  message      String
+  remindAt     DateTime
+  kind         String     @default("custom") // due | custom | checkin | morning
+  dismissed    Boolean    @default(false)
+
+  @@index([studentId])
+}
+
+model CalendarEvent {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  title     String
+  date      DateTime
+  type      String   @default("event") // test | quiz | project | event
+
+  @@index([studentId])
+}
+
+model Achievement {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  title       String
+  description String
+  icon        String
+
+  students StudentAchievement[]
+}
+
+model StudentAchievement {
+  id            String      @id @default(cuid())
+  studentId     String
+  student       Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  unlockedAt    DateTime    @default(now())
+
+  @@unique([studentId, achievementId])
+}
+
+model XPTransaction {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  amount    Int
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@index([studentId])
+}
+
+model ActivityDay {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date      String   // YYYY-MM-DD
+
+  @@unique([studentId, date])
+}
+
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  label     String
+  checked   Boolean  @default(false)
+  isDefault Boolean  @default(false)
+  order     Int      @default(0)
+
+  @@index([studentId])
+}
+
+model BrainDumpEntry {
+  id                   String   @id @default(cuid())
+  studentId            String
+  student              Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  text                 String
+  convertedToAssignmentId String?
+  createdAt            DateTime @default(now())
+
+  @@index([studentId])
+}
+
+model RewardItem {
+  id       String  @id @default(cuid())
+  key      String  @unique
+  name     String
+  category String  // hat | outfit | accessory | background | theme
+  cost     Int
+  assetRef String
+
+  students StudentRewardItem[]
+}
+
+model StudentRewardItem {
+  id           String     @id @default(cuid())
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  rewardItemId String
+  rewardItem   RewardItem @relation(fields: [rewardItemId], references: [id], onDelete: Cascade)
+  equipped     Boolean    @default(false)
+  purchasedAt  DateTime   @default(now())
+
+  @@unique([studentId, rewardItemId])
+}
