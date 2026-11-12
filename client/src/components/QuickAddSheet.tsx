@@ -43,7 +43,7 @@ export function QuickAddSheet({ onClose }: { onClose: () => void }) {
       notes: notes || undefined,
       priority,
     });
-    celebrateXp(result.xp, "New quest added");
+    celebrateXp(result.xp, "new_quest");
     onClose();
   };
 

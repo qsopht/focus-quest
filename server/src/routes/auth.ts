@@ -1,8 +1,9 @@
 import { Router } from "express";
+import { wrapAsync } from "../lib/asyncRouter";
 import { prisma } from "../db";
 import { signToken } from "../middleware/auth";
 
-export const authRouter = Router();
+export const authRouter = wrapAsync(Router());
 
 export const DEFAULT_SUBJECTS = [
   { name: "Math", color: "#6366f1", icon: "calculator" },

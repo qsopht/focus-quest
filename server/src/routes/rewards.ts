@@ -1,8 +1,9 @@
 import { Router } from "express";
+import { wrapAsync } from "../lib/asyncRouter";
 import { prisma } from "../db";
 import { AuthedRequest, requireAuth } from "../middleware/auth";
 
-export const rewardsRouter = Router();
+export const rewardsRouter = wrapAsync(Router());
 rewardsRouter.use(requireAuth);
 
 rewardsRouter.get("/", async (req: AuthedRequest, res) => {

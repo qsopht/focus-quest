@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, Square } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { PageContainer } from "../components/PageContainer";
 import { ProgressRing } from "../components/ProgressRing";
 import { SubjectBadge } from "../components/SubjectBadge";
@@ -12,11 +12,18 @@ const DURATIONS = [5, 10, 15, 20];
 
 type Phase = "setup" | "running" | "paused" | "done";
 
+interface AutoStart {
+  assignmentId?: string;
+  durationMinutes: number;
+}
+
 export default function Focus() {
   const { data: assignments } = useAssignments("active");
   const startSession = useStartFocusSession();
   const finishSession = useFinishFocusSession();
   const { celebrateXp } = useCelebration();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [duration, setDuration] = useState(10);
   const [assignmentId, setAssignmentId] = useState<string | null>(null);
@@ -27,6 +34,31 @@ export default function Focus() {
   const [lastXp, setLastXp] = useState<number | null>(null);
 
   const intervalRef = useRef<number | null>(null);
+  const autoStarted = useRef(false);
+
+  const selectedAssignment = assignments?.find((a: Assignment) => a.id === assignmentId) ?? null;
+
+  const startWith = async (aId: string | null, minutes: number) => {
+    const result = await startSession.mutateAsync({ assignmentId: aId ?? undefined, durationMinutes: minutes });
+    setSessionId(result.session.id);
+    setDuration(minutes);
+    setAssignmentId(aId);
+    setRemaining(minutes * 60);
+    setElapsed(0);
+    setPhase("running");
+    for (const xp of result.xpEvents) celebrateXp(xp, "focus_start");
+  };
+
+  // Arrives from RescueSheet via navigate("/focus", { state: { autoStart } }).
+  useEffect(() => {
+    const autoStart = (location.state as { autoStart?: AutoStart } | null)?.autoStart;
+    if (autoStart && !autoStarted.current) {
+      autoStarted.current = true;
+      startWith(autoStart.assignmentId ?? null, autoStart.durationMinutes);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (phase !== "running") return;
@@ -46,22 +78,14 @@ export default function Focus() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remaining, phase]);
 
-  const selectedAssignment = assignments?.find((a: Assignment) => a.id === assignmentId) ?? null;
-
-  const start = async () => {
-    const session = await startSession.mutateAsync({ assignmentId: assignmentId ?? undefined, durationMinutes: duration });
-    setSessionId(session.id);
-    setRemaining(duration * 60);
-    setElapsed(0);
-    setPhase("running");
-  };
+  const start = () => startWith(assignmentId, duration);
 
   const finish = async (completed: boolean) => {
     if (!sessionId) return;
     setPhase("done");
     const result = await finishSession.mutateAsync({ id: sessionId, elapsedSeconds: elapsed, completed });
     setLastXp(result.xp?.amount ?? null);
-    if (result.xp) celebrateXp(result.xp, completed ? "Focus session complete!" : "Nice effort!");
+    if (result.xp) celebrateXp(result.xp, completed ? "focus_complete" : "focus_effort");
   };
 
   const reset = () => {

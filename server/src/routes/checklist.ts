@@ -1,8 +1,10 @@
 import { Router } from "express";
+import { wrapAsync } from "../lib/asyncRouter";
 import { prisma } from "../db";
 import { AuthedRequest, requireAuth } from "../middleware/auth";
+import { awardOncePerDay, XP_ACTIONS, XP_REASONS } from "../lib/xp";
 
-export const checklistRouter = Router();
+export const checklistRouter = wrapAsync(Router());
 checklistRouter.use(requireAuth);
 
 checklistRouter.get("/", async (req: AuthedRequest, res) => {
@@ -26,8 +28,14 @@ checklistRouter.post("/", async (req: AuthedRequest, res) => {
 checklistRouter.post("/:id/toggle", async (req: AuthedRequest, res) => {
   const item = await prisma.checklistItem.findFirst({ where: { id: req.params.id, studentId: req.studentId } });
   if (!item) return res.status(404).json({ error: "Not found" });
-  const updated = await prisma.checklistItem.update({ where: { id: item.id }, data: { checked: !item.checked } });
-  res.json(updated);
+  const makeChecked = !item.checked;
+  const updated = await prisma.checklistItem.update({ where: { id: item.id }, data: { checked: makeChecked } });
+
+  let xp = null;
+  if (makeChecked) {
+    xp = await awardOncePerDay(req.studentId!, XP_REASONS.BACKPACK_CHECKLIST, XP_ACTIONS.BACKPACK_CHECKLIST);
+  }
+  res.json({ item: updated, xp });
 });
 
 checklistRouter.post("/reset", async (req: AuthedRequest, res) => {

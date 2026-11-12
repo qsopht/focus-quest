@@ -1,8 +1,9 @@
 import { Router } from "express";
+import { wrapAsync } from "../lib/asyncRouter";
 import { prisma } from "../db";
 import { AuthedRequest, requireAuth } from "../middleware/auth";
 
-export const subjectsRouter = Router();
+export const subjectsRouter = wrapAsync(Router());
 subjectsRouter.use(requireAuth);
 
 subjectsRouter.get("/", async (req: AuthedRequest, res) => {

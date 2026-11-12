@@ -9,9 +9,12 @@ import {
   useDeleteAssignment,
   useDeleteStep,
   useReopenAssignment,
+  useSubjects,
   useSuggestSteps,
+  useUpdateAssignment,
 } from "../api/hooks";
 import { useCelebration } from "../context/CelebrationContext";
+import { dateInputValue } from "../lib/dates";
 import type { Assignment } from "../types";
 
 export function QuestDetailSheet({ assignment, onClose }: { assignment: Assignment; onClose: () => void }) {
@@ -22,21 +25,62 @@ export function QuestDetailSheet({ assignment, onClose }: { assignment: Assignme
   const deleteStep = useDeleteStep();
   const addSteps = useAddSteps();
   const suggestSteps = useSuggestSteps();
+  const updateAssignment = useUpdateAssignment();
+  const { data: subjects } = useSubjects();
   const { celebrateXp } = useCelebration();
 
   const [newStep, setNewStep] = useState("");
   const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [editingFields, setEditingFields] = useState(false);
 
   const doneSteps = assignment.steps.filter((s) => s.completed).length;
+
+  const updateField = async (payload: { subjectId?: string | null; dueDate?: string | null }) => {
+    const result = await updateAssignment.mutateAsync({ id: assignment.id, ...payload });
+    if (result.xp) celebrateXp(result.xp, "organizing");
+  };
 
   return (
     <Sheet title="Quest details" onClose={onClose}>
       <div className="space-y-5">
         <div>
-          <div className="flex items-center gap-2">
-            <SubjectBadge subject={assignment.subject} />
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setEditingFields((v) => !v)}>
+              <SubjectBadge subject={assignment.subject} />
+            </button>
             <span className="text-sm text-slate-500">{assignment.friendlyDue}</span>
+            {!editingFields && (
+              <button
+                onClick={() => setEditingFields(true)}
+                className="text-xs font-medium text-brand-600 hover:underline"
+              >
+                Edit
+              </button>
+            )}
           </div>
+
+          {editingFields && (
+            <div className="mt-2 space-y-2 rounded-xl bg-slate-50 p-3">
+              <div className="flex flex-wrap gap-1.5">
+                {subjects?.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => updateField({ subjectId: s.id === assignment.subjectId ? null : s.id })}
+                    className={`rounded-full ${s.id === assignment.subjectId ? "ring-2 ring-brand-500" : ""}`}
+                  >
+                    <SubjectBadge subject={s} size="sm" />
+                  </button>
+                ))}
+              </div>
+              <input
+                type="date"
+                value={assignment.dueDate ? dateInputValue(new Date(assignment.dueDate)) : ""}
+                onChange={(e) => updateField({ dueDate: e.target.value || null })}
+                className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
+              />
+            </div>
+          )}
+
           <h2 className="mt-2 text-xl font-bold text-slate-800">{assignment.title}</h2>
           {assignment.notes && <p className="mt-1 text-sm text-slate-500">{assignment.notes}</p>}
           {assignment.estimatedMinutes && (
@@ -73,7 +117,8 @@ export function QuestDetailSheet({ assignment, onClose }: { assignment: Assignme
               <div className="flex gap-2">
                 <button
                   onClick={async () => {
-                    await addSteps.mutateAsync({ assignmentId: assignment.id, titles: suggestions });
+                    const result = await addSteps.mutateAsync({ assignmentId: assignment.id, titles: suggestions });
+                    if (result.xp) celebrateXp(result.xp, "steps_broken_down");
                     setSuggestions(null);
                   }}
                   className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white"
@@ -93,7 +138,7 @@ export function QuestDetailSheet({ assignment, onClose }: { assignment: Assignme
                 <button
                   onClick={async () => {
                     const result = await completeStep.mutateAsync({ assignmentId: assignment.id, stepId: step.id });
-                    if (result.xp) celebrateXp(result.xp, "Step complete");
+                    if (result.xp) celebrateXp(result.xp, "step_complete");
                   }}
                   aria-label={step.completed ? "Mark step incomplete" : "Mark step complete"}
                   className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition ${
@@ -121,7 +166,8 @@ export function QuestDetailSheet({ assignment, onClose }: { assignment: Assignme
             onSubmit={async (e) => {
               e.preventDefault();
               if (!newStep.trim()) return;
-              await addSteps.mutateAsync({ assignmentId: assignment.id, titles: [newStep.trim()] });
+              const result = await addSteps.mutateAsync({ assignmentId: assignment.id, titles: [newStep.trim()] });
+              if (result.xp) celebrateXp(result.xp, "steps_broken_down");
               setNewStep("");
             }}
           >
@@ -142,7 +188,7 @@ export function QuestDetailSheet({ assignment, onClose }: { assignment: Assignme
             <button
               onClick={async () => {
                 const result = await completeAssignment.mutateAsync(assignment.id);
-                if (result.xp) celebrateXp(result.xp, "Quest complete!");
+                if (result.xp) celebrateXp(result.xp, "quest_complete");
                 onClose();
               }}
               className="flex-1 rounded-xl bg-brand-600 py-2.5 font-bold text-white hover:bg-brand-700"

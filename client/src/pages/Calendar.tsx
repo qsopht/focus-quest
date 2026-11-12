@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { PageContainer } from "../components/PageContainer";
 import { QuestCard } from "../components/QuestCard";
@@ -10,6 +10,7 @@ import {
   useCalendarEvents,
   useCompleteAssignment,
   useDeleteCalendarEvent,
+  useReviewUpcoming,
   useUpdateAssignment,
 } from "../api/hooks";
 import { useCelebration } from "../context/CelebrationContext";
@@ -43,7 +44,22 @@ export default function CalendarPage() {
   const completeAssignment = useCompleteAssignment();
   const updateAssignment = useUpdateAssignment();
   const deleteEvent = useDeleteCalendarEvent();
+  const reviewUpcoming = useReviewUpcoming();
   const { celebrateXp } = useCelebration();
+
+  const reviewedUpcomingThisMount = useRef(false);
+  useEffect(() => {
+    if (tab === "upcoming" && !reviewedUpcomingThisMount.current) {
+      reviewedUpcomingThisMount.current = true;
+      reviewUpcoming.mutate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  const handleReschedule = async (assignmentId: string, dueDate: string) => {
+    const result = await updateAssignment.mutateAsync({ id: assignmentId, dueDate });
+    if (result.xp) celebrateXp(result.xp, "organizing");
+  };
 
   const now = new Date();
 
@@ -72,7 +88,7 @@ export default function CalendarPage() {
 
   const handleComplete = async (id: string) => {
     const result = await completeAssignment.mutateAsync(id);
-    if (result.xp) celebrateXp(result.xp, "Quest complete!");
+    if (result.xp) celebrateXp(result.xp, "quest_complete");
   };
 
   const openAssignment =
@@ -114,7 +130,7 @@ export default function CalendarPage() {
           <p className="mb-2 text-sm font-bold text-amber-700">Catch up — no stress, just whenever you're ready</p>
           <div className="space-y-2">
             {overdue.map((a) => (
-              <QuestCard key={a.id} assignment={a} overdue onComplete={() => handleComplete(a.id)} onOpen={() => setOpenAssignmentId(a.id)} onReschedule={(d) => updateAssignment.mutate({ id: a.id, dueDate: d })} />
+              <QuestCard key={a.id} assignment={a} overdue onComplete={() => handleComplete(a.id)} onOpen={() => setOpenAssignmentId(a.id)} onReschedule={(d) => handleReschedule(a.id, d)} />
             ))}
           </div>
         </div>
@@ -185,7 +201,7 @@ export default function CalendarPage() {
                         assignment={item.assignment}
                         onComplete={() => handleComplete(item.assignment!.id)}
                         onOpen={() => setOpenAssignmentId(item.assignment!.id)}
-                        onReschedule={(d) => updateAssignment.mutate({ id: item.assignment!.id, dueDate: d })}
+                        onReschedule={(d) => handleReschedule(item.assignment!.id, d)}
                       />
                     ) : (
                       <div key={item.event!.id} className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">

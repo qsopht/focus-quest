@@ -50,41 +50,126 @@ export function getLevelInfo(totalXp: number) {
   };
 }
 
+// Human-readable `reason` strings double as the celebration toast's sub-label
+// default. `XP_ACTIONS` below carries the stable machine key used for
+// anti-farming idempotency checks and achievement predicates.
 export const XP_REASONS = {
   ADD_ASSIGNMENT: "Added a quest",
   COMPLETE_STEP: "Completed a step",
   COMPLETE_ASSIGNMENT: "Completed a quest",
+  COMPLETE_ALL_STEPS_BONUS: "Finished every step",
   FOCUS_SESSION: "Finished a focus session",
+  START_FOCUS_SESSION: "Started a focus session",
+  RESUME_TASK: "Got back on track",
   ROUTINE_ITEM: "Checked off a routine item",
   DAILY_CHECKIN: "Reviewed today's quests",
+  REVIEW_UPCOMING: "Reviewed upcoming work",
   BRAIN_DUMP: "Captured a thought",
+  PROCESS_BRAIN_DUMP: "Organized a thought",
+  ADD_DUE_DATE: "Added a due date",
+  SET_SUBJECT: "Organized by subject",
+  BREAK_INTO_STEPS: "Broke it into steps",
+  BACKPACK_CHECKLIST: "Prepped the backpack",
+} as const;
+
+export const XP_ACTIONS = {
+  ADD_ASSIGNMENT: "ADD_ASSIGNMENT",
+  COMPLETE_STEP: "COMPLETE_STEP",
+  COMPLETE_ASSIGNMENT: "COMPLETE_ASSIGNMENT",
+  COMPLETE_ALL_STEPS_BONUS: "COMPLETE_ALL_STEPS_BONUS",
+  FOCUS_SESSION: "FOCUS_SESSION",
+  START_FOCUS_SESSION: "START_FOCUS_SESSION",
+  RESUME_TASK: "RESUME_TASK",
+  ROUTINE_ITEM: "ROUTINE_ITEM",
+  DAILY_CHECKIN: "DAILY_CHECKIN",
+  REVIEW_UPCOMING: "REVIEW_UPCOMING",
+  BRAIN_DUMP: "BRAIN_DUMP",
+  PROCESS_BRAIN_DUMP: "PROCESS_BRAIN_DUMP",
+  ADD_DUE_DATE: "ADD_DUE_DATE",
+  SET_SUBJECT: "SET_SUBJECT",
+  BREAK_INTO_STEPS: "BREAK_INTO_STEPS",
+  BACKPACK_CHECKLIST: "BACKPACK_CHECKLIST",
 } as const;
 
 const XP_AMOUNTS: Record<string, number> = {
   [XP_REASONS.ADD_ASSIGNMENT]: 5,
   [XP_REASONS.COMPLETE_STEP]: 10,
   [XP_REASONS.COMPLETE_ASSIGNMENT]: 25,
+  [XP_REASONS.COMPLETE_ALL_STEPS_BONUS]: 10,
   [XP_REASONS.FOCUS_SESSION]: 15,
+  [XP_REASONS.START_FOCUS_SESSION]: 5,
+  [XP_REASONS.RESUME_TASK]: 5,
   [XP_REASONS.ROUTINE_ITEM]: 5,
   [XP_REASONS.DAILY_CHECKIN]: 5,
-  [XP_REASONS.BRAIN_DUMP]: 2,
+  [XP_REASONS.REVIEW_UPCOMING]: 5,
+  [XP_REASONS.BRAIN_DUMP]: 3,
+  [XP_REASONS.PROCESS_BRAIN_DUMP]: 5,
+  [XP_REASONS.ADD_DUE_DATE]: 3,
+  [XP_REASONS.SET_SUBJECT]: 5,
+  [XP_REASONS.BREAK_INTO_STEPS]: 5,
+  [XP_REASONS.BACKPACK_CHECKLIST]: 5,
 };
 
-export async function awardXp(studentId: string, reason: string, amountOverride?: number) {
+export interface AwardXpOptions {
+  actionType?: string;
+  relatedEntityType?: string;
+  relatedEntityId?: string;
+  amountOverride?: number;
+  /**
+   * When true (and actionType + relatedEntityType + relatedEntityId are all
+   * given), skips the award entirely if an XPTransaction with that exact
+   * combination already exists. This is the one place anti-farming logic
+   * lives — every route that wants a "once per assignment" / "once per day"
+   * reward goes through this instead of re-implementing its own check.
+   */
+  oncePerEntity?: boolean;
+}
+
+export async function awardXp(studentId: string, reason: string, opts: AwardXpOptions = {}) {
+  const { actionType, relatedEntityType, relatedEntityId, amountOverride, oncePerEntity } = opts;
+
+  if (oncePerEntity && (!actionType || !relatedEntityType || !relatedEntityId)) {
+    throw new Error("oncePerEntity requires actionType, relatedEntityType, and relatedEntityId");
+  }
+
   const amount = amountOverride ?? XP_AMOUNTS[reason] ?? 5;
   const stars = Math.max(1, Math.round(amount / 2));
 
-  await prisma.$transaction([
-    prisma.xPTransaction.create({ data: { studentId, amount, reason } }),
-    prisma.student.update({
-      where: { id: studentId },
-      data: { totalXp: { increment: amount }, stars: { increment: stars } },
-    }),
-  ]);
+  try {
+    await prisma.$transaction([
+      prisma.xPTransaction.create({
+        data: { studentId, amount, reason, actionType, relatedEntityType, relatedEntityId },
+      }),
+      prisma.student.update({
+        where: { id: studentId },
+        data: { totalXp: { increment: amount }, stars: { increment: stars } },
+      }),
+    ]);
+  } catch (err: any) {
+    // Unique constraint hit (P2002): this exact (studentId, actionType,
+    // relatedEntityType, relatedEntityId) was already awarded — including by
+    // a second request that lost a race with this one. The DB constraint
+    // makes this check atomic, unlike a separate find-then-create. Only
+    // oncePerEntity awards tag all three fields, so only they can collide.
+    if (oncePerEntity && err?.code === "P2002") return null;
+    throw err;
+  }
 
   await markActive(studentId);
   const unlocked = await checkAchievements(studentId);
   return { amount, stars, unlocked };
+}
+
+// Thin wrapper for "once a day" rewards (daily check-in, reviewing upcoming
+// work, prepping the backpack) — reuses the same oncePerEntity mechanism by
+// treating "today" as the entity.
+export async function awardOncePerDay(studentId: string, reason: string, actionType: string) {
+  return awardXp(studentId, reason, {
+    actionType,
+    relatedEntityType: "day",
+    relatedEntityId: dayKey(),
+    oncePerEntity: true,
+  });
 }
 
 export async function markActive(studentId: string) {
@@ -106,6 +191,10 @@ export async function getWeeklyStreak(studentId: string) {
 }
 
 type AchievementPredicate = (studentId: string) => Promise<boolean>;
+
+async function countActionType(studentId: string, actionType: string) {
+  return prisma.xPTransaction.count({ where: { studentId, actionType } });
+}
 
 const ACHIEVEMENT_PREDICATES: Record<string, AchievementPredicate> = {
   first_quest: async (studentId) => {
@@ -145,8 +234,19 @@ const ACHIEVEMENT_PREDICATES: Record<string, AchievementPredicate> = {
   },
   brain_unloaded: async (studentId) => {
     const count = await prisma.brainDumpEntry.count({ where: { studentId } });
-    return count >= 3;
+    return count >= 5;
   },
+  sorted_it_out: async (studentId) => (await countActionType(studentId, XP_ACTIONS.PROCESS_BRAIN_DUMP)) >= 5,
+  planner_pro: async (studentId) => (await countActionType(studentId, XP_ACTIONS.REVIEW_UPCOMING)) >= 5,
+  step_planner: async (studentId) => (await countActionType(studentId, XP_ACTIONS.BREAK_INTO_STEPS)) >= 3,
+  small_wins: async (studentId) => {
+    const count = await prisma.assignmentStep.count({
+      where: { completed: true, assignment: { studentId } },
+    });
+    return count >= 10;
+  },
+  looking_ahead: async (studentId) => (await countActionType(studentId, XP_ACTIONS.DAILY_CHECKIN)) >= 5,
+  back_on_track: async (studentId) => (await countActionType(studentId, XP_ACTIONS.RESUME_TASK)) >= 1,
 };
 
 export async function checkAchievements(studentId: string): Promise<string[]> {

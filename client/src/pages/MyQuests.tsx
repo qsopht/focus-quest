@@ -37,7 +37,7 @@ export default function MyQuests() {
 
   const handleComplete = async (id: string) => {
     const result = await completeAssignment.mutateAsync(id);
-    if (result.xp) celebrateXp(result.xp, "Quest complete!");
+    if (result.xp) celebrateXp(result.xp, "quest_complete");
   };
 
   return (

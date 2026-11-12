@@ -16,6 +16,31 @@ interface CelebrationContextValue {
 
 const CelebrationContext = createContext<CelebrationContextValue | null>(null);
 
+// Varied phrasing pools keyed by context, so the same action doesn't show the
+// exact same toast every time ("messages should vary to avoid becoming
+// repetitive"). Any label not found here is shown verbatim — existing call
+// sites that pass a plain custom string keep working unchanged.
+const MESSAGE_POOLS: Record<string, string[]> = {
+  quest_complete: ["Great job getting organized.", "Look at you making progress!", "One less thing to worry about.", "Nice! That's done."],
+  step_complete: ["One small step is still progress.", "That's progress!", "Nice work chipping away at it.", "Small win — it counts."],
+  new_quest: ["Nice! You got that out of your head and into your planner.", "Got it — one more thing you won't forget.", "Added. You're staying on top of it."],
+  brain_dump_capture: ["Nice! You got that out of your head and into your planner.", "Got it out of your head — nice.", "Captured. You can let that go now."],
+  brain_dump_processed: ["Great job getting organized.", "Sorted and handled.", "That's one less loose end."],
+  steps_broken_down: ["You broke that big assignment into smaller steps. That's progress!", "Smaller steps, same goal. Nice work.", "That's a lot less scary now."],
+  focus_start: ["You showed up and got started. That's a win.", "Here we go — one step at a time."],
+  focus_complete: ["You showed up and got started. That's a win.", "Look at you making progress!", "That session counted."],
+  focus_effort: ["Some progress beats no progress.", "You tried — that matters.", "Every bit of effort counts."],
+  routine_item: ["Nice and ready for what's next.", "That's one more thing handled."],
+  organizing: ["Great job getting organized.", "Nice and tidy — good work."],
+};
+
+function pickMessage(key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  const pool = MESSAGE_POOLS[key];
+  if (!pool) return key;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 export function CelebrationProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const counter = useRef(0);
@@ -32,7 +57,7 @@ export function CelebrationProvider({ children }: { children: ReactNode }) {
   const celebrateXp = useCallback(
     (xp: XpAward | null | undefined, label?: string) => {
       if (!xp) return;
-      push({ kind: "xp", text: `+${xp.amount} XP`, sub: label });
+      push({ kind: "xp", text: `+${xp.amount} XP`, sub: pickMessage(label) });
       for (const key of xp.unlocked) {
         const achievement = lookupAchievement(key);
         push({

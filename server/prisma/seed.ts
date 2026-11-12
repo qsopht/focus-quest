@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { prisma } from "../src/db";
-import { awardXp, XP_REASONS, checkAchievements } from "../src/lib/xp";
+import { awardXp, XP_ACTIONS, XP_REASONS, checkAchievements } from "../src/lib/xp";
 import { addDays } from "../src/lib/dates";
 import { ACHIEVEMENTS, REWARD_ITEMS } from "../src/lib/catalog";
 import { DEFAULT_SUBJECTS, DEFAULT_ROUTINES, DEFAULT_CHECKLIST } from "../src/routes/auth";
@@ -235,8 +235,27 @@ async function main() {
   }
 
   console.log("Seeding brain dump entries...");
-  await prisma.brainDumpEntry.create({ data: { studentId: student.id, text: "Ask Ms. Lee about extra credit" } });
+  const teacherNote = await prisma.brainDumpEntry.create({
+    data: { studentId: student.id, text: "Ask Ms. Lee about extra credit" },
+  });
   await prisma.brainDumpEntry.create({ data: { studentId: student.id, text: "Don't forget the field trip permission slip" } });
+  await prisma.brainDumpEntry.create({ data: { studentId: student.id, text: "Bring gym clothes tomorrow" } });
+  await prisma.brainDumpEntry.create({ data: { studentId: student.id, text: "Finish the science worksheet" } });
+
+  // Demonstrate the "processed" state: this one was already turned into a reminder.
+  const teacherReminder = await prisma.reminder.create({
+    data: { studentId: student.id, message: teacherNote.text, remindAt: dueAt(1, 8), kind: "custom" },
+  });
+  await prisma.brainDumpEntry.update({
+    where: { id: teacherNote.id },
+    data: { status: "processed", convertedItemType: "reminder", convertedItemId: teacherReminder.id },
+  });
+  await awardXp(student.id, XP_REASONS.PROCESS_BRAIN_DUMP, {
+    actionType: XP_ACTIONS.PROCESS_BRAIN_DUMP,
+    relatedEntityType: "brain_dump",
+    relatedEntityId: teacherNote.id,
+    oncePerEntity: true,
+  });
 
   console.log("Backfilling recent activity days (unlocks Steady Week)...");
   for (let i = 0; i < 5; i++) {

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { PageContainer } from "../components/PageContainer";
 import { SettingsSection } from "../components/SettingsSection";
 import { Toggle } from "../components/Toggle";
@@ -7,9 +8,6 @@ import {
   useAddChecklistItem,
   useAddRoutineItem,
   useBrainDump,
-  useAddBrainDump,
-  useConvertBrainDump,
-  useDeleteBrainDump,
   useChecklist,
   useCompleteRoutineItem,
   useDeleteChecklistItem,
@@ -43,9 +41,7 @@ export default function Settings() {
   const resetChecklist = useResetChecklist();
 
   const { data: brainDump } = useBrainDump();
-  const addBrainDump = useAddBrainDump();
-  const convertBrainDump = useConvertBrainDump();
-  const deleteBrainDump = useDeleteBrainDump();
+  const unsortedCount = brainDump?.filter((e) => e.status === "unsorted").length ?? 0;
   const { celebrateXp } = useCelebration();
 
   const { supported, permission, request } = useNotificationPermission();
@@ -54,7 +50,6 @@ export default function Settings() {
   const [afterSchoolCheckin, setAfterSchoolCheckin] = useLocalPref("afterschool_checkin", false);
 
   const [newChecklistItem, setNewChecklistItem] = useState("");
-  const [newBrainDump, setNewBrainDump] = useState("");
   const [newRoutineItems, setNewRoutineItems] = useState<Record<string, string>>({});
 
   return (
@@ -92,7 +87,7 @@ export default function Settings() {
                     <button
                       onClick={async () => {
                         const result = await completeRoutineItem.mutateAsync(item.id);
-                        if (result.xp) celebrateXp(result.xp, "Routine checked off");
+                        if (result.xp) celebrateXp(result.xp, "routine_item");
                       }}
                       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
                         item.completedToday ? "border-brand-500 bg-brand-500 text-white" : "border-slate-300 text-transparent"
@@ -139,7 +134,10 @@ export default function Settings() {
           {checklist?.map((item) => (
             <div key={item.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
               <button
-                onClick={() => toggleChecklistItem.mutate(item.id)}
+                onClick={async () => {
+                  const result = await toggleChecklistItem.mutateAsync(item.id);
+                  if (result.xp) celebrateXp(result.xp, "organizing");
+                }}
                 className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
                   item.checked ? "border-brand-500 bg-brand-500 text-white" : "border-slate-300 text-transparent"
                 }`}
@@ -185,45 +183,17 @@ export default function Settings() {
       </SettingsSection>
 
       <SettingsSection title="Brain dump">
-        <p className="mb-2 text-sm text-slate-500">Quickly jot down anything you don't want to forget.</p>
-        <form
-          className="flex gap-2"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!newBrainDump.trim()) return;
-            const result = await addBrainDump.mutateAsync(newBrainDump.trim());
-            celebrateXp(result.xp);
-            setNewBrainDump("");
-          }}
+        <Link
+          to="/brain-dump"
+          className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 hover:bg-slate-100"
         >
-          <input
-            value={newBrainDump}
-            onChange={(e) => setNewBrainDump(e.target.value)}
-            placeholder="e.g. Ask about extra credit"
-            className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          />
-          <button type="submit" className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white hover:bg-brand-700">
-            Save
-          </button>
-        </form>
-        <div className="mt-3 space-y-1.5">
-          {brainDump?.map((entry) => (
-            <div key={entry.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-              <span className="flex-1 text-slate-700">{entry.text}</span>
-              {!entry.convertedToAssignmentId && (
-                <button
-                  onClick={() => convertBrainDump.mutate(entry.id)}
-                  className="text-xs font-semibold text-brand-600 hover:underline"
-                >
-                  Make it a quest
-                </button>
-              )}
-              <button onClick={() => deleteBrainDump.mutate(entry.id)} className="text-slate-300 hover:text-rose-500">
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
+          <span className="text-sm font-medium text-slate-700">
+            {unsortedCount > 0 ? `${unsortedCount} thing${unsortedCount === 1 ? "" : "s"} to sort through` : "All sorted"}
+          </span>
+          <span className="inline-flex items-center gap-1 text-sm font-semibold text-brand-600">
+            Open Brain Dump <ChevronRight size={16} />
+          </span>
+        </Link>
       </SettingsSection>
 
       <SettingsSection title="Profile">

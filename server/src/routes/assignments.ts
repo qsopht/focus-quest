@@ -1,11 +1,13 @@
 import { Router } from "express";
+import { wrapAsync } from "../lib/asyncRouter";
 import { prisma } from "../db";
 import { AuthedRequest, requireAuth } from "../middleware/auth";
-import { awardXp, XP_REASONS } from "../lib/xp";
+import { awardXp, XP_ACTIONS, XP_REASONS } from "../lib/xp";
 import { friendlyDue, endOfDay, endOfThisWeek, startOfDay, parseDateInput } from "../lib/dates";
 import { suggestSteps } from "../lib/stepSuggestions";
+import { markRecommendationCompleted } from "../lib/recommend";
 
-export const assignmentsRouter = Router();
+export const assignmentsRouter = wrapAsync(Router());
 assignmentsRouter.use(requireAuth);
 
 function serialize(a: any) {
@@ -75,7 +77,12 @@ assignmentsRouter.post("/", async (req: AuthedRequest, res) => {
     include: { subject: true, steps: true },
   });
 
-  const xp = await awardXp(req.studentId!, XP_REASONS.ADD_ASSIGNMENT);
+  const xp = await awardXp(req.studentId!, XP_REASONS.ADD_ASSIGNMENT, {
+    actionType: XP_ACTIONS.ADD_ASSIGNMENT,
+    relatedEntityType: "assignment",
+    relatedEntityId: assignment.id,
+    oncePerEntity: true,
+  });
   res.status(201).json({ assignment: serialize(assignment), xp });
 });
 
@@ -96,7 +103,29 @@ assignmentsRouter.patch("/:id", async (req: AuthedRequest, res) => {
     },
     include: { subject: true, steps: { orderBy: { order: "asc" } } },
   });
-  res.json(serialize(assignment));
+
+  // Reward organizing behaviors (setting these for the first time), not every edit.
+  let xp = null;
+  if (dueDate !== undefined && !existing.dueDate && assignment.dueDate) {
+    xp =
+      (await awardXp(req.studentId!, XP_REASONS.ADD_DUE_DATE, {
+        actionType: XP_ACTIONS.ADD_DUE_DATE,
+        relatedEntityType: "assignment",
+        relatedEntityId: assignment.id,
+        oncePerEntity: true,
+      })) ?? xp;
+  }
+  if (subjectId !== undefined && !existing.subjectId && assignment.subjectId) {
+    xp =
+      (await awardXp(req.studentId!, XP_REASONS.SET_SUBJECT, {
+        actionType: XP_ACTIONS.SET_SUBJECT,
+        relatedEntityType: "assignment",
+        relatedEntityId: assignment.id,
+        oncePerEntity: true,
+      })) ?? xp;
+  }
+
+  res.json({ assignment: serialize(assignment), xp });
 });
 
 assignmentsRouter.delete("/:id", async (req: AuthedRequest, res) => {
@@ -115,7 +144,13 @@ assignmentsRouter.post("/:id/complete", async (req: AuthedRequest, res) => {
     include: { subject: true, steps: { orderBy: { order: "asc" } } },
   });
 
-  const xp = await awardXp(req.studentId!, XP_REASONS.COMPLETE_ASSIGNMENT);
+  const xp = await awardXp(req.studentId!, XP_REASONS.COMPLETE_ASSIGNMENT, {
+    actionType: XP_ACTIONS.COMPLETE_ASSIGNMENT,
+    relatedEntityType: "assignment",
+    relatedEntityId: assignment.id,
+    oncePerEntity: true,
+  });
+  await markRecommendationCompleted(req.studentId!, "assignment", assignment.id);
   res.json({ assignment: serialize(assignment), xp });
 });
 
@@ -159,8 +194,18 @@ assignmentsRouter.post("/:id/steps", async (req: AuthedRequest, res) => {
     })),
   });
 
+  let xp = null;
+  if (existingCount === 0) {
+    xp = await awardXp(req.studentId!, XP_REASONS.BREAK_INTO_STEPS, {
+      actionType: XP_ACTIONS.BREAK_INTO_STEPS,
+      relatedEntityType: "assignment",
+      relatedEntityId: assignment.id,
+      oncePerEntity: true,
+    });
+  }
+
   const steps = await prisma.assignmentStep.findMany({ where: { assignmentId: assignment.id }, orderBy: { order: "asc" } });
-  res.status(201).json(steps);
+  res.status(201).json({ steps, xp });
 });
 
 assignmentsRouter.patch("/:id/steps/:stepId", async (req: AuthedRequest, res) => {
@@ -200,7 +245,26 @@ assignmentsRouter.post("/:id/steps/:stepId/complete", async (req: AuthedRequest,
 
   let xp = null;
   if (makeComplete) {
-    xp = await awardXp(req.studentId!, XP_REASONS.COMPLETE_STEP);
+    xp = await awardXp(req.studentId!, XP_REASONS.COMPLETE_STEP, {
+      actionType: XP_ACTIONS.COMPLETE_STEP,
+      relatedEntityType: "assignment_step",
+      relatedEntityId: step.id,
+      oncePerEntity: true,
+    });
+    await markRecommendationCompleted(req.studentId!, "assignment_step", step.id);
+
+    const allSteps = await prisma.assignmentStep.findMany({ where: { assignmentId: assignment.id } });
+    if (allSteps.length >= 2 && allSteps.every((s) => s.completed)) {
+      const bonus = await awardXp(req.studentId!, XP_REASONS.COMPLETE_ALL_STEPS_BONUS, {
+        actionType: XP_ACTIONS.COMPLETE_ALL_STEPS_BONUS,
+        relatedEntityType: "assignment",
+        relatedEntityId: assignment.id,
+        oncePerEntity: true,
+      });
+      if (bonus) {
+        xp = { amount: xp!.amount + bonus.amount, stars: xp!.stars + bonus.stars, unlocked: [...xp!.unlocked, ...bonus.unlocked] };
+      }
+    }
   }
   res.json({ step: updated, xp });
 });

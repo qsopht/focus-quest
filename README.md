@@ -124,13 +124,87 @@ to create a new profile). Representative endpoints:
 - `POST /api/focus-sessions`, `/:id/finish`
 - `GET/POST /api/routines`, `/items/:id/complete`
 - `GET /api/achievements`, `GET/POST /api/rewards/:id/purchase|equip|unequip`
-- `GET/POST /api/checklist`, `/api/braindump`, `/api/calendar-events`, `/api/reminders`
+- `GET/POST /api/checklist`, `/api/calendar-events`, `/api/reminders`
+- `GET/POST /api/braindump` (+ `/:id/convert-to-assignment|reminder|event|checklist`,
+  `/:id/keep-as-note`, `/:id/suggest-category`)
+- `POST /api/recommendations/next` (+ `/:id/accept`, `/:id/dismiss`) — the "What Should I Do Now?"
+  engine
+- `POST /api/activity/checkin`, `/api/activity/review-upcoming` — once-per-day planning rewards
+- `GET /api/me/progress` — positive-milestone counts for the Rewards page
 
 ### Frontend pages
 
 `Home` (dashboard) · `MyQuests` · `Calendar` · `Focus` · `Rewards` · `Settings` — matching the nav
-the spec asked for. Backpack checklist and Brain Dump live inside Settings rather than getting
-their own nav items, to keep the primary navigation short.
+the spec asked for; the main nav still has exactly these 6 items. `BrainDump` (`/brain-dump`) is a
+7th page, reached via a floating action button on every screen and from Home's quick actions —
+deliberately *not* added to the nav bar, to keep primary navigation unchanged per the enhancement
+brief's "preserve existing navigation."
+
+## Executive-function enhancements
+
+Three features layered onto the MVP above, each reusing existing components/models wherever
+practical rather than introducing parallel systems.
+
+### 1. Brain Dump
+
+`BrainDumpEntry` now has a `status` (`unsorted` → `processed`, reserved `archived` for later) plus
+`convertedItemType`/`convertedItemId` (generalizing the old single `convertedToAssignmentId` field).
+Capture is available from literally anywhere via `components/BrainDumpFab.tsx`, a floating button
+(mounted once in `App.tsx`, so an unsaved draft survives navigating to another page) that opens a
+lightweight popover — not a full-screen sheet, deliberately, per "avoid making this another
+complicated task-management screen." The dedicated `/brain-dump` page lists Unsorted entries with
+one-tap conversions (`server/src/routes/braindump.ts`: `/convert-to-assignment`,
+`/convert-to-reminder`, `/convert-to-event`, `/convert-to-checklist`, `/keep-as-note`) and a muted
+Processed list showing what each became. "Help me organize these" uses a deterministic keyword
+heuristic (`server/src/lib/brainDumpHeuristics.ts`, same no-AI-required philosophy as the existing
+`stepSuggestions.ts`) — never required for capturing or converting.
+
+### 2. Process-based rewards
+
+`awardXp()` (`server/src/lib/xp.ts`) gained an anti-farming mechanism: pass `oncePerEntity: true`
+with an `actionType`/`relatedEntityType`/`relatedEntityId`, and a **database unique constraint**
+(`@@unique([studentId, actionType, relatedEntityType, relatedEntityId])` on `XPTransaction`) makes
+"award this at most once" atomic — not a check-then-insert race. This was found to matter in
+practice: a find-then-create version of the same guard let two near-simultaneous requests (e.g.
+React 18 StrictMode's intentional double effect-invoke in dev) both pass the check and double-award
+XP before either insert committed; the unique constraint (SQLite, like standard SQL, treats NULL as
+distinct from NULL, so the many un-tagged transactions never collide with each other) closes that
+race regardless of cause. New reward actions, all additive (existing amounts like quest/step/focus
+completion are unchanged, to avoid re-tuning the level curve): adding a due date (+3, once per
+assignment), setting a subject (+5, once per assignment), breaking an assignment into steps (+5,
+once per assignment), finishing every step of a multi-step quest (+10 bonus on top of the normal
+completion award), processing a Brain Dump entry (+5, once per entry), starting a focus session
+(+5, rate-limited to avoid rapid-restart spam), resuming a task with a second focus session (+5,
+once per assignment), and two once-per-day planning actions — a daily check-in (`/api/activity/
+checkin`, fired once when Home mounts) and reviewing upcoming work (`/api/activity/
+review-upcoming`, fired once when Calendar's Upcoming tab opens). Six new achievements recognize
+these behaviors (`Sorted It Out`, `Planner Pro`, `Step by Step`, `Small Wins`, `Looking Ahead`,
+`Back on Track`); two of the brief's suggested achievements ("Getting Organized" for organizing,
+"Breaking It Down" for breaking down) already existed with different meanings (adding 5 assignments;
+completing a multi-step quest) and were kept as-is rather than silently redefined. Celebration
+toasts (`context/CelebrationContext.tsx`) now pick from small pools of varied phrasing per context
+instead of one fixed string, so the same action doesn't show identical copy every time. A "Your
+Progress" strip on the Rewards page shows five positive-milestone counts, computed on demand from
+existing tables (no new counter table, same philosophy as the XP ledger itself).
+
+### 3. What Should I Do Now? (Rescue Mode)
+
+`server/src/lib/recommend.ts` scores candidates (incomplete assignment steps, whole assignments,
+unsorted Brain Dump entries) on urgency (overdue/today/tomorrow/this week), effort (small estimates
+score higher, a large assignment with no steps is penalized toward "needs breaking down" rather
+than recommended whole), whether the student already started it, and priority — so it does not
+simply chase the closest deadline. `RecommendationHistory` records what was shown, whether it was
+accepted/dismissed (so "Show Me Another" never immediately repeats a dismissed item) and, best-
+effort, whether it was later completed. The dedicated `components/RescueSheet.tsx` offers one
+recommendation at a time with a plain-language reason, "Give Me Something Easier" (filters to short
+tasks, falling back to a small organizational win — add a due date, organize one Brain Dump entry,
+check off one backpack item — never schoolwork invented to fill the slot), "Show Me Another,"
+"Break This Assignment Down" (reuses the existing `QuestDetailSheet`'s suggest-steps flow directly
+— no separate breakdown UI), and "I Need a Short Break." Accepting a schoolwork recommendation
+navigates to `/focus` with router state that auto-starts a session pre-filled with that assignment
+and a duration clamped to the existing 5/10/15/20-minute presets; accepting a Brain Dump
+recommendation performs its suggested conversion immediately. With nothing outstanding, it shows a
+positive "You're all caught up!" state with optional shortcuts — never an invented task.
 
 ## What's implemented
 
@@ -147,9 +221,10 @@ levels, and achievements; responsive layout tested at phone/tablet/desktop width
 **Phase 2, also implemented:**
 Avatar customization + Reward Store (stars currency, equip-by-category); daily routines (morning /
 after-school / evening) with per-day completion; backpack checklist with a "reset for tomorrow"
-button; Brain Dump with one-tap "make it a quest" conversion; a broader achievement set; in-app
-reminder toasts plus opt-in browser `Notification` API support (polls every 60s, dismisses each
-reminder server-side after it fires once, so nothing nags twice).
+button; a broader achievement set; in-app reminder toasts plus opt-in browser `Notification` API
+support (polls every 60s, dismisses each reminder server-side after it fires once, so nothing nags
+twice); and the full Brain Dump / process-rewards / "What Should I Do Now?" feature set described
+below under [Executive-function enhancements](#executive-function-enhancements).
 
 **Explicitly not implemented (Phase 3, documented as future work):**
 Real AI-powered breakdown or natural-language quest entry (the "Suggest steps" feature today is a
@@ -179,6 +254,12 @@ single shared or personal device, not a multi-tenant public login.
   from `npm start`, add real authentication, and likely move off a single SQLite file on a volume
   to Postgres (one `railway add --database postgres` plus a `DATABASE_URL` swap, no code changes
   needed beyond the Prisma `datasource` provider).
+- The recommendation engine's scoring weights are hand-picked heuristics, not tuned against real
+  usage data — reasonable starting points, documented inline in `lib/recommend.ts`, expected to need
+  adjustment once real students use it.
+- "Reviewing tomorrow's responsibilities" (one of the brief's suggested reward categories) wasn't
+  given its own trigger — it's folded into the existing evening routine's "Check tomorrow's
+  schedule" item, which already covers the same behavior via `ROUTINE_ITEM` rewards.
 
 ## Verification performed
 
@@ -190,3 +271,19 @@ single shared or personal device, not a multi-tenant public login.
   a quest from the Calendar view, Today/This Week/Upcoming/Month views, and a full page reload to
   confirm persistence survives (real SQLite file, not in-memory state).
 - Checked responsive layout at 375px (phone) and desktop widths.
+- Brain Dump: captured entries from the global FAB on a non-Settings page and from the dedicated
+  page; converted one entry of each type (assignment/reminder/calendar/checklist/note) and confirmed
+  each appears correctly in its destination feature; confirmed Unsorted/Processed are visually
+  distinct and survive a full page reload; confirmed the heuristic "Help me organize these"
+  suggestions match the entry text.
+- Process rewards: fired every new XP action at least once and confirmed its matching achievement
+  unlocks at the right threshold; confirmed editing the same field twice (e.g. setting a due date,
+  then changing it again) only grants XP once; fired 5 concurrent requests at a once-per-day reward
+  and confirmed exactly one was credited (the race-condition test that caught and fixed the
+  find-then-create bug described above).
+- What Should I Do Now?: confirmed it does not simply chase the closest deadline (an overdue short
+  task outranked a sooner-but-longer one); exercised "Give Me Something Easier" (picked a smaller
+  task), "Show Me Another" (never immediately repeated the dismissed item), "Break This Assignment
+  Down" (opened the existing step-breakdown flow), and the accept → auto-started focus session path
+  end to end, including the resulting XP award; cleared all active quests and Brain Dump entries and
+  confirmed the positive "all caught up" state instead of an invented task.

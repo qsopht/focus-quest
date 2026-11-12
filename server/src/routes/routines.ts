@@ -1,10 +1,11 @@
 import { Router } from "express";
+import { wrapAsync } from "../lib/asyncRouter";
 import { prisma } from "../db";
 import { AuthedRequest, requireAuth } from "../middleware/auth";
 import { awardXp, XP_REASONS } from "../lib/xp";
 import { dayKey } from "../lib/dates";
 
-export const routinesRouter = Router();
+export const routinesRouter = wrapAsync(Router());
 routinesRouter.use(requireAuth);
 
 routinesRouter.get("/", async (req: AuthedRequest, res) => {

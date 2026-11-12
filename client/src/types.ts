@@ -131,6 +131,64 @@ export interface ChecklistItem {
 export interface BrainDumpEntry {
   id: string;
   text: string;
-  convertedToAssignmentId: string | null;
+  status: "unsorted" | "processed" | "archived";
+  convertedItemType: "assignment" | "reminder" | "calendar_event" | "checklist_item" | "note" | null;
+  convertedItemId: string | null;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface CategorySuggestion {
+  category: "assignment" | "reminder" | "checklist" | "note";
+  label: string;
+}
+
+export interface ProgressSummary {
+  assignmentsCompleted: number;
+  assignmentStepsCompleted: number;
+  focusSessionsCompleted: number;
+  brainDumpEntriesProcessed: number;
+  dailyCheckInsCompleted: number;
+}
+
+interface RecommendationBase {
+  reason: string;
+}
+
+export type Recommendation =
+  | (RecommendationBase & {
+      type: "assignment_step";
+      assignmentId: string;
+      stepId: string;
+      title: string;
+      assignmentTitle: string;
+      subject: { name: string; color: string; icon: string } | null;
+      estimatedMinutes: number;
+    })
+  | (RecommendationBase & {
+      type: "assignment";
+      assignmentId: string;
+      title: string;
+      subject: { name: string; color: string; icon: string } | null;
+      estimatedMinutes: number;
+      needsBreakdown: boolean;
+      allStepsDone: boolean;
+    })
+  | (RecommendationBase & {
+      type: "brain_dump";
+      brainDumpId: string;
+      text: string;
+      suggestedCategory: CategorySuggestion["category"];
+    })
+  | (RecommendationBase & {
+      type: "organizational";
+      action: "add_due_date" | "organize_brain_dump" | "pack_item";
+      entityId: string;
+      title: string;
+    })
+  | { type: "all_caught_up" };
+
+export interface RecommendationResponse {
+  recommendation: Recommendation;
+  historyId: string;
 }

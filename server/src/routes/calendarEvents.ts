@@ -1,9 +1,10 @@
 import { Router } from "express";
+import { wrapAsync } from "../lib/asyncRouter";
 import { prisma } from "../db";
 import { AuthedRequest, requireAuth } from "../middleware/auth";
 import { parseDateInput } from "../lib/dates";
 
-export const calendarEventsRouter = Router();
+export const calendarEventsRouter = wrapAsync(Router());
 calendarEventsRouter.use(requireAuth);
 
 calendarEventsRouter.get("/", async (req: AuthedRequest, res) => {

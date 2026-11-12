@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ArrowRight, Plus, Timer } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Brain, Compass, Plus, Timer } from "lucide-react";
 import { Link } from "react-router-dom";
 import { PageContainer } from "../components/PageContainer";
 import { XpBar } from "../components/XpBar";
@@ -8,7 +8,8 @@ import { ProgressRing } from "../components/ProgressRing";
 import { QuestCard } from "../components/QuestCard";
 import { QuickAddSheet } from "../components/QuickAddSheet";
 import { QuestDetailSheet } from "../components/QuestDetailSheet";
-import { useAssignments, useCompleteAssignment, useMe, useRewards } from "../api/hooks";
+import { RescueSheet } from "../components/RescueSheet";
+import { useAssignments, useCompleteAssignment, useDailyCheckin, useMe, useRewards } from "../api/hooks";
 import { useCelebration } from "../context/CelebrationContext";
 
 const ENCOURAGEMENTS = [
@@ -30,23 +31,30 @@ export default function Home() {
   const { data: me } = useMe();
   const { data: today } = useAssignments("today");
   const { data: overdue } = useAssignments("overdue");
+  const { data: active } = useAssignments("active");
   const { data: rewards } = useRewards();
   const completeAssignment = useCompleteAssignment();
+  const dailyCheckin = useDailyCheckin();
   const { celebrateXp } = useCelebration();
 
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showRescue, setShowRescue] = useState(false);
   const [openAssignmentId, setOpenAssignmentId] = useState<string | null>(null);
 
+  useEffect(() => {
+    dailyCheckin.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const todaysList = useMemo(() => [...(overdue ?? []), ...(today ?? [])], [today, overdue]);
-  const openAssignment = todaysList.find((a) => a.id === openAssignmentId) ?? null;
+  const openAssignment = (active ?? []).find((a) => a.id === openAssignmentId) ?? null;
   const completedToday = todaysList.filter((a) => a.status === "completed").length;
-  const nextUp = todaysList.find((a) => a.status === "active");
   const equipped = useMemo(() => rewards?.items.filter((i) => i.owned && i.equipped) ?? [], [rewards]);
   const encouragement = useMemo(() => ENCOURAGEMENTS[new Date().getDate() % ENCOURAGEMENTS.length], []);
 
   const handleComplete = async (id: string) => {
     const result = await completeAssignment.mutateAsync(id);
-    if (result.xp) celebrateXp(result.xp, "Quest complete!");
+    if (result.xp) celebrateXp(result.xp, "quest_complete");
   };
 
   if (!me) return null;
@@ -74,19 +82,18 @@ export default function Home() {
         )}
       </div>
 
-      {nextUp && (
-        <div className="mt-6 rounded-2xl bg-gradient-to-br from-brand-600 to-brand-700 p-5 text-white shadow-md">
-          <p className="text-xs font-bold uppercase tracking-wide text-brand-100">Next up</p>
-          <h2 className="mt-1 text-xl font-bold">{nextUp.title}</h2>
-          <p className="mt-1 text-sm text-brand-100">{nextUp.friendlyDue}</p>
-          <button
-            onClick={() => setOpenAssignmentId(nextUp.id)}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold backdrop-blur hover:bg-white/25"
-          >
-            Get started <ArrowRight size={16} />
-          </button>
+      <button
+        onClick={() => setShowRescue(true)}
+        className="mt-6 flex w-full items-center gap-4 rounded-2xl bg-gradient-to-br from-brand-600 to-brand-700 p-5 text-left text-white shadow-md transition hover:shadow-lg"
+      >
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/15">
+          <Compass size={24} />
         </div>
-      )}
+        <div>
+          <h2 className="text-lg font-extrabold">What Should I Do Now?</h2>
+          <p className="text-sm text-brand-100">Not sure where to start? Let's find your next move.</p>
+        </div>
+      </button>
 
       <div className="mt-6 flex items-center justify-between">
         <h2 className="text-lg font-bold text-slate-700">Today's quests</h2>
@@ -116,23 +123,41 @@ export default function Home() {
           ))}
       </div>
 
-      <div className="mt-8 grid grid-cols-2 gap-3">
+      <div className="mt-8 grid grid-cols-3 gap-3">
         <button
           onClick={() => setShowQuickAdd(true)}
-          className="flex items-center justify-center gap-2 rounded-2xl bg-brand-600 py-4 font-bold text-white shadow hover:bg-brand-700"
+          className="flex flex-col items-center justify-center gap-1.5 rounded-2xl bg-brand-600 py-4 font-bold text-white shadow hover:bg-brand-700"
         >
-          <Plus size={18} /> Add a quest
+          <Plus size={18} />
+          <span className="text-xs sm:text-sm">Add a quest</span>
         </button>
         <Link
-          to="/focus"
-          className="flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-200 py-4 font-bold text-brand-700 hover:bg-brand-50"
+          to="/brain-dump"
+          className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-amber-200 py-4 font-bold text-amber-700 hover:bg-amber-50"
         >
-          <Timer size={18} /> Start focusing
+          <Brain size={18} />
+          <span className="text-xs sm:text-sm">Brain Dump</span>
+        </Link>
+        <Link
+          to="/focus"
+          className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-brand-200 py-4 font-bold text-brand-700 hover:bg-brand-50"
+        >
+          <Timer size={18} />
+          <span className="text-xs sm:text-sm">Start focusing</span>
         </Link>
       </div>
 
       {showQuickAdd && <QuickAddSheet onClose={() => setShowQuickAdd(false)} />}
       {openAssignment && <QuestDetailSheet assignment={openAssignment} onClose={() => setOpenAssignmentId(null)} />}
+      {showRescue && (
+        <RescueSheet
+          onClose={() => setShowRescue(false)}
+          onBreakDown={(assignmentId) => {
+            setShowRescue(false);
+            setOpenAssignmentId(assignmentId);
+          }}
+        />
+      )}
     </PageContainer>
   );
 }

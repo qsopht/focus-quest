@@ -1,8 +1,9 @@
 import { Router } from "express";
+import { wrapAsync } from "../lib/asyncRouter";
 import { prisma } from "../db";
 import { AuthedRequest, requireAuth } from "../middleware/auth";
 
-export const remindersRouter = Router();
+export const remindersRouter = wrapAsync(Router());
 remindersRouter.use(requireAuth);
 
 remindersRouter.get("/", async (req: AuthedRequest, res) => {

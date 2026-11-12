@@ -6,9 +6,12 @@ import type {
   AssignmentStep,
   BrainDumpEntry,
   CalendarEvent,
+  CategorySuggestion,
   ChecklistItem,
   FocusSession,
   MeSummary,
+  ProgressSummary,
+  RecommendationResponse,
   Reminder,
   RewardItem,
   Routine,
@@ -62,10 +65,17 @@ export function useCreateAssignment() {
 
 export function useUpdateAssignment() {
   const qc = useQueryClient();
+  const invalidateMe = useInvalidateMe();
   return useMutation({
     mutationFn: ({ id, ...payload }: Partial<Assignment> & { id: string }) =>
-      api.patch<Assignment>(`/assignments/${id}`, payload),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["assignments"] }),
+      api.patch<{ assignment: Assignment; xp: XpAward | null }>(`/assignments/${id}`, payload),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["assignments"] });
+      if (result.xp) {
+        qc.invalidateQueries({ queryKey: ["achievements"] });
+        invalidateMe();
+      }
+    },
   });
 }
 
@@ -105,11 +115,18 @@ export function useSuggestSteps() {
 }
 
 export function useAddSteps() {
-  const invalidate = useInvalidateAssignments();
+  const qc = useQueryClient();
+  const invalidateMe = useInvalidateMe();
   return useMutation({
     mutationFn: ({ assignmentId, titles }: { assignmentId: string; titles: string[] }) =>
-      api.post<AssignmentStep[]>(`/assignments/${assignmentId}/steps`, { titles }),
-    onSuccess: invalidate,
+      api.post<{ steps: AssignmentStep[]; xp: XpAward | null }>(`/assignments/${assignmentId}/steps`, { titles }),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["assignments"] });
+      if (result.xp) {
+        qc.invalidateQueries({ queryKey: ["achievements"] });
+        invalidateMe();
+      }
+    },
   });
 }
 
@@ -139,9 +156,17 @@ export function useDeleteStep() {
 // --- Focus sessions ---
 
 export function useStartFocusSession() {
+  const invalidateMe = useInvalidateMe();
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: { assignmentId?: string | null; durationMinutes: number }) =>
-      api.post<FocusSession>("/focus-sessions", payload),
+      api.post<{ session: FocusSession; xpEvents: XpAward[] }>("/focus-sessions", payload),
+    onSuccess: (result) => {
+      if (result.xpEvents.length > 0) {
+        invalidateMe();
+        qc.invalidateQueries({ queryKey: ["achievements"] });
+      }
+    },
   });
 }
 
@@ -303,9 +328,13 @@ export function useAddChecklistItem() {
 
 export function useToggleChecklistItem() {
   const qc = useQueryClient();
+  const invalidateMe = useInvalidateMe();
   return useMutation({
-    mutationFn: (id: string) => api.post<ChecklistItem>(`/checklist/${id}/toggle`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["checklist"] }),
+    mutationFn: (id: string) => api.post<{ item: ChecklistItem; xp: XpAward | null }>(`/checklist/${id}/toggle`),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["checklist"] });
+      if (result.xp) invalidateMe();
+    },
   });
 }
 
@@ -343,14 +372,81 @@ export function useAddBrainDump() {
   });
 }
 
-export function useConvertBrainDump() {
+function useInvalidateBrainDump() {
   const qc = useQueryClient();
+  const invalidateMe = useInvalidateMe();
+  return (xp: XpAward | null | undefined) => {
+    qc.invalidateQueries({ queryKey: ["braindump"] });
+    if (xp) {
+      qc.invalidateQueries({ queryKey: ["achievements"] });
+      invalidateMe();
+    }
+  };
+}
+
+export function useConvertBrainDumpToAssignment() {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateBrainDump();
   return useMutation({
-    mutationFn: (id: string) => api.post<{ assignment: Assignment }>(`/braindump/${id}/convert`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["braindump"] });
+    mutationFn: ({ id, subjectId, dueDate }: { id: string; subjectId?: string; dueDate?: string }) =>
+      api.post<{ assignment: Assignment; xp: XpAward | null }>(`/braindump/${id}/convert-to-assignment`, {
+        subjectId,
+        dueDate,
+      }),
+    onSuccess: (result) => {
+      invalidate(result.xp);
       qc.invalidateQueries({ queryKey: ["assignments"] });
     },
+  });
+}
+
+export function useConvertBrainDumpToReminder() {
+  const invalidate = useInvalidateBrainDump();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ reminder: Reminder; xp: XpAward | null }>(`/braindump/${id}/convert-to-reminder`),
+    onSuccess: (result) => {
+      invalidate(result.xp);
+      qc.invalidateQueries({ queryKey: ["reminders"] });
+    },
+  });
+}
+
+export function useConvertBrainDumpToEvent() {
+  const invalidate = useInvalidateBrainDump();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ event: CalendarEvent; xp: XpAward | null }>(`/braindump/${id}/convert-to-event`),
+    onSuccess: (result) => {
+      invalidate(result.xp);
+      qc.invalidateQueries({ queryKey: ["calendar-events"] });
+    },
+  });
+}
+
+export function useConvertBrainDumpToChecklist() {
+  const invalidate = useInvalidateBrainDump();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ item: ChecklistItem; xp: XpAward | null }>(`/braindump/${id}/convert-to-checklist`),
+    onSuccess: (result) => {
+      invalidate(result.xp);
+      qc.invalidateQueries({ queryKey: ["checklist"] });
+    },
+  });
+}
+
+export function useKeepBrainDumpAsNote() {
+  const invalidate = useInvalidateBrainDump();
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ ok: true; xp: XpAward | null }>(`/braindump/${id}/keep-as-note`),
+    onSuccess: (result) => invalidate(result.xp),
+  });
+}
+
+export function useSuggestBrainDumpCategory() {
+  return useMutation({
+    mutationFn: (id: string) => api.get<CategorySuggestion>(`/braindump/${id}/suggest-category`),
   });
 }
 
@@ -359,5 +455,58 @@ export function useDeleteBrainDump() {
   return useMutation({
     mutationFn: (id: string) => api.delete(`/braindump/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["braindump"] }),
+  });
+}
+
+// --- Progress ---
+
+export function useProgressSummary() {
+  return useQuery({ queryKey: ["progress"], queryFn: () => api.get<ProgressSummary>("/me/progress") });
+}
+
+// --- Recommendations ("What Should I Do Now?") ---
+
+export function useNextRecommendation() {
+  return useMutation({
+    mutationFn: (payload: {
+      mode?: "normal" | "easier";
+      excludeAssignmentIds?: string[];
+      excludeStepIds?: string[];
+      excludeBrainDumpIds?: string[];
+    }) => api.post<RecommendationResponse>("/recommendations/next", payload),
+  });
+}
+
+export function useAcceptRecommendation() {
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/recommendations/${id}/accept`),
+  });
+}
+
+export function useDismissRecommendation() {
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/recommendations/${id}/dismiss`),
+  });
+}
+
+// --- Daily activity (once-per-day planning actions) ---
+
+export function useDailyCheckin() {
+  const invalidateMe = useInvalidateMe();
+  return useMutation({
+    mutationFn: () => api.post<{ xp: XpAward | null }>("/activity/checkin"),
+    onSuccess: (result) => {
+      if (result.xp) invalidateMe();
+    },
+  });
+}
+
+export function useReviewUpcoming() {
+  const invalidateMe = useInvalidateMe();
+  return useMutation({
+    mutationFn: () => api.post<{ xp: XpAward | null }>("/activity/review-upcoming"),
+    onSuccess: (result) => {
+      if (result.xp) invalidateMe();
+    },
   });
 }

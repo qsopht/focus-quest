@@ -33,6 +33,7 @@ model Student {
   brainDumps      BrainDumpEntry[]
   rewardItems     StudentRewardItem[]
   activityDays    ActivityDay[]
+  recommendations RecommendationHistory[]
 }
 
 model Subject {
@@ -180,14 +181,23 @@ model StudentAchievement {
 }
 
 model XPTransaction {
-  id        String   @id @default(cuid())
-  studentId String
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  amount    Int
-  reason    String
-  createdAt DateTime @default(now())
+  id                String   @id @default(cuid())
+  studentId         String
+  student           Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  amount            Int
+  reason            String
+  actionType        String? // stable machine key, e.g. "ADD_DUE_DATE" (distinct from the
+                             // human-readable `reason` string shown in celebration toasts)
+  relatedEntityType String? // "assignment" | "assignment_step" | "brain_dump" | "day" | ...
+  relatedEntityId   String?
+  createdAt         DateTime @default(now())
 
   @@index([studentId])
+  // Enforces "award once per entity" atomically at the DB level — SQLite (like
+  // standard SQL) treats NULL as distinct from NULL, so the many transactions
+  // that don't tag an entity (actionType/relatedEntityType/relatedEntityId
+  // all null) never collide with each other here.
+  @@unique([studentId, actionType, relatedEntityType, relatedEntityId])
 }
 
 model ActivityDay {
@@ -212,12 +222,30 @@ model ChecklistItem {
 }
 
 model BrainDumpEntry {
-  id                   String   @id @default(cuid())
-  studentId            String
-  student              Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  text                 String
-  convertedToAssignmentId String?
-  createdAt            DateTime @default(now())
+  id                String   @id @default(cuid())
+  studentId         String
+  student           Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  text              String
+  status            String   @default("unsorted") // unsorted | processed | archived
+  convertedItemType String? // assignment | reminder | calendar_event | checklist_item | note
+  convertedItemId   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([studentId])
+}
+
+model RecommendationHistory {
+  id                    String   @id @default(cuid())
+  studentId             String
+  student               Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  recommendedEntityType String   // assignment_step | assignment | brain_dump | organizational | all_caught_up
+  recommendedEntityId   String?
+  recommendationReason  String
+  mode                  String   @default("normal") // normal | easier
+  accepted              Boolean?
+  completed             Boolean?
+  createdAt             DateTime @default(now())
 
   @@index([studentId])
 }

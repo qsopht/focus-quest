@@ -4,8 +4,24 @@ import { PageContainer } from "../components/PageContainer";
 import { XpBar } from "../components/XpBar";
 import { AvatarView } from "../components/AvatarView";
 import { IconSymbol } from "../components/IconSymbol";
-import { useAchievements, useEquipReward, useMe, usePurchaseReward, useRewards, useUnequipReward } from "../api/hooks";
+import {
+  useAchievements,
+  useEquipReward,
+  useMe,
+  useProgressSummary,
+  usePurchaseReward,
+  useRewards,
+  useUnequipReward,
+} from "../api/hooks";
 import type { RewardItem } from "../types";
+
+const PROGRESS_TILES: { key: "assignmentsCompleted" | "assignmentStepsCompleted" | "focusSessionsCompleted" | "brainDumpEntriesProcessed" | "dailyCheckInsCompleted"; label: string; icon: string }[] = [
+  { key: "assignmentsCompleted", label: "Quests completed", icon: "flag" },
+  { key: "assignmentStepsCompleted", label: "Steps completed", icon: "list-checks" },
+  { key: "focusSessionsCompleted", label: "Focus sessions", icon: "timer" },
+  { key: "brainDumpEntriesProcessed", label: "Thoughts organized", icon: "brain" },
+  { key: "dailyCheckInsCompleted", label: "Planning check-ins", icon: "moon" },
+];
 
 const CATEGORY_LABELS: Record<string, string> = {
   hat: "Hats",
@@ -19,6 +35,7 @@ export default function Rewards() {
   const { data: me } = useMe();
   const { data: achievements } = useAchievements();
   const { data: rewards } = useRewards();
+  const { data: progress } = useProgressSummary();
   const purchase = usePurchaseReward();
   const equip = useEquipReward();
   const unequip = useUnequipReward();
@@ -50,6 +67,21 @@ export default function Rewards() {
           </div>
         </div>
       </div>
+
+      {progress && (
+        <div className="mt-6">
+          <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-400">Your Progress</h2>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {PROGRESS_TILES.map((tile) => (
+              <div key={tile.key} className="flex flex-col items-center gap-1 rounded-xl border border-slate-100 bg-white p-3 text-center">
+                <IconSymbol name={tile.icon} size={18} className="text-brand-500" />
+                <span className="text-lg font-extrabold text-slate-800">{progress[tile.key]}</span>
+                <span className="text-[11px] leading-tight text-slate-500">{tile.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 flex gap-1 rounded-xl bg-slate-100 p-1">
         <button
