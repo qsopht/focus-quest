@@ -39,12 +39,15 @@ app runs as a single Node process in production — one Railway service, one URL
 frontend host needed.
 
 Deployed as: project `focus-quest`, service `web`, with a persistent volume mounted at `/data`
-(`DATABASE_URL=file:/data/dev.db`) so the SQLite file survives restarts without needing to switch
+(`DATABASE_URL=file:/data/dev2.db`) so the SQLite file survives restarts without needing to switch
 database engines. `npm start` (root `package.json`) runs `prisma migrate deploy` → `npm run seed`
 → `node dist/index.js` every time the service (re)starts — so the live demo always resets to the
 same clean "Jordan" demo state after a redeploy or restart. That's a deliberate choice for a
 public demo link with no password, not a pattern to carry into a real deployment with real student
-data.
+data. (The filename bumped from `dev.db` to `dev2.db` once, when a schema migration adding a
+required column couldn't apply to the volume's existing rows — `prisma migrate dev`'s normal
+interactive backfill prompt isn't available in a non-interactive deploy. Fine for a demo volume;
+a real deployment would resolve that the proper way, by writing a data migration instead.)
 
 To redeploy after making changes (requires the Railway CLI, already linked to this project via
 `railway init`):
