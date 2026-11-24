@@ -11,7 +11,7 @@
     "seed": "npm run seed -w server",
     "build": "npm run build -w server && npm run build -w client",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
-    "start": "npm run prisma:migrate:ci -w server && npm run seed -w server && npm run start -w server"
+    "start": "npm run prisma:migrate:ci -w server && npm run seed:if-empty -w server && npm run start -w server"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

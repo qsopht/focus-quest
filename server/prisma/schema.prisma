@@ -1,11 +1,11 @@
 // Focus Quest data model.
-// Using SQLite for zero-setup local dev. To move to Postgres/MySQL later,
-// change `provider` + `url` below (Prisma's schema/query API stays the same);
-// the only SQLite-specific concession here is storing small JSON blobs
+// Postgres-backed (Railway). Prisma's schema/query API is the same across SQL
+// databases, so this moved here from SQLite with no changes below this block;
+// the only SQLite-era concession kept as-is is storing small JSON blobs
 // (avatarConfig) as plain strings instead of a native Json column.
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

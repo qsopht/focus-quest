@@ -6,6 +6,15 @@ import { ACHIEVEMENTS, REWARD_ITEMS } from "../src/lib/catalog";
 import { DEFAULT_SUBJECTS, DEFAULT_ROUTINES, DEFAULT_CHECKLIST } from "../src/routes/auth";
 
 async function main() {
+  const force = process.argv.includes("--force") || process.env.SEED_FORCE === "true";
+  if (!force) {
+    const existing = await prisma.student.count();
+    if (existing > 0) {
+      console.log(`Database already has ${existing} student(s) — skipping seed (pass --force to reset).`);
+      return;
+    }
+  }
+
   console.log("Resetting demo data...");
   await prisma.studentAchievement.deleteMany();
   await prisma.achievement.deleteMany();

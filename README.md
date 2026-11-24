@@ -4,25 +4,33 @@ An ADHD-friendly school productivity app for middle-school (and up) students. Th
 screen is to answer four questions as simply as possible: **what do I need to do, what's next,
 when's it due, and how much progress have I made** — framed as quests, not chores.
 
-This is a fully working, persisted application (real SQLite database, real REST API) — not a
+This is a fully working, persisted application (real Postgres database, real REST API) — not a
 mockup. Sample data for a demo student ("Jordan") is included so the app is interesting to explore
 immediately after setup.
 
 ## Quick start
 
-Requires Node.js 18+.
+Requires Node.js 18+ and a Postgres database (a one-line `docker compose up -d` is enough — no
+other setup).
 
 ```bash
+docker compose up -d
 npm install
 cp server/.env.example server/.env
 npm run seed
 npm run dev
 ```
 
-- `npm run seed` creates `server/prisma/dev.db` (SQLite) and fills it with a realistic demo
-  student: quests due today/this week/upcoming/overdue, a multi-step project in progress, some
-  completed history, focus session history, unlocked + locked achievements, routines, a backpack
-  checklist, and a couple of brain dump notes.
+- `docker compose up -d` starts a local Postgres container (`docker-compose.yml`) on
+  `localhost:5544` (an uncommon port, chosen to avoid colliding with any Postgres already
+  installed natively on `5432`), matching `server/.env.example`'s default `DATABASE_URL`. Point
+  `DATABASE_URL` at any other reachable Postgres instance instead if you'd rather not use Docker.
+- `npm run seed` always resets to a realistic demo student ("Jordan"): quests due
+  today/this week/upcoming/overdue, a multi-step project in progress, some completed history,
+  focus session history, unlocked + locked achievements, routines, a backpack checklist, and a
+  couple of brain dump notes. (`npm run seed:if-empty` — used by the production start command —
+  does the same thing but only when the database has no students yet, so a deployed app's real
+  data is never wiped on restart.)
 - `npm run dev` runs the API (http://localhost:4000) and the Vite dev client
   (http://localhost:5173) together. Open the client URL and pick "Jordan" from the profile picker
   (no password — see [Authentication](#authentication-model) below).
@@ -34,20 +42,24 @@ data).
 
 **https://web-production-7b7819df.up.railway.app**
 
-The server now also serves the built client as static files (`server/src/index.ts`), so the whole
-app runs as a single Node process in production — one Railway service, one URL, no separate
-frontend host needed.
+The server also serves the built client as static files (`server/src/index.ts`), so the whole app
+runs as a single Node process in production — one Railway service, one URL, no separate frontend
+host needed.
 
-Deployed as: project `focus-quest`, service `web`, with a persistent volume mounted at `/data`
-(`DATABASE_URL=file:/data/dev2.db`) so the SQLite file survives restarts without needing to switch
-database engines. `npm start` (root `package.json`) runs `prisma migrate deploy` → `npm run seed`
-→ `node dist/index.js` every time the service (re)starts — so the live demo always resets to the
-same clean "Jordan" demo state after a redeploy or restart. That's a deliberate choice for a
-public demo link with no password, not a pattern to carry into a real deployment with real student
-data. (The filename bumped from `dev.db` to `dev2.db` once, when a schema migration adding a
-required column couldn't apply to the volume's existing rows — `prisma migrate dev`'s normal
-interactive backfill prompt isn't available in a non-interactive deploy. Fine for a demo volume;
-a real deployment would resolve that the proper way, by writing a data migration instead.)
+Deployed as: project `focus-quest`, with two services — `web` (the Node app) and `Postgres` (a
+Railway-managed Postgres database with its own persistent volume). `web`'s `DATABASE_URL` is a
+variable reference to the Postgres service (`${{Postgres.DATABASE_URL}}`), resolved over Railway's
+private network — no connection string is hardcoded. `npm start` (root `package.json`) runs
+`prisma migrate deploy` → `npm run seed:if-empty` → `node dist/index.js` every time the service
+(re)starts: migrations apply automatically, the "Jordan" demo student is created only the first
+time the database is empty, and every restart or redeploy after that preserves whatever real data
+exists — unlike the SQLite-on-a-volume version this replaced, which reseeded (and lost) its data
+every restart.
+
+The app originally shipped on SQLite (zero external services, ideal for a from-scratch demo). It
+moved to Postgres so the live deployment behaves like a real multi-process-friendly backend — no
+code changes were needed beyond `schema.prisma`'s `datasource` block and the migration history,
+exactly as the original SQLite-era README predicted.
 
 To redeploy after making changes (requires the Railway CLI, already linked to this project via
 `railway init`):
@@ -57,7 +69,7 @@ railway up --service web --ci
 ```
 
 Config lives in `railway.json` (build/start commands) plus the `DATABASE_URL`, `JWT_SECRET`, and
-`NODE_ENV` variables set on the `web` service (`railway variable list --service web`).
+`NODE_ENV` variables set on the `web` service (`railway variables --service web`).
 
 ## Continuous integration
 
@@ -74,16 +86,19 @@ not just the machine it was built on.
 npm workspaces monorepo:
 
 ```
-server/   Express + TypeScript REST API, Prisma ORM, SQLite
+server/   Express + TypeScript REST API, Prisma ORM, Postgres
 client/   React + TypeScript + Vite + Tailwind CSS, TanStack Query for server state
 ```
 
-**Why SQLite?** The spec's preferred stack is MySQL/Postgres, but the priority for an MVP is
-running with minimal setup — no Docker, no external DB server. Prisma's schema/query API is the
-same across SQL databases, so moving to Postgres or MySQL later is a two-line change
-(`server/prisma/schema.prisma`'s `datasource` block) plus a fresh `prisma migrate`; nothing in the
-route/service code is SQLite-specific except that one JSON column (`avatarConfig`) is stored as a
-string rather than a native `Json` type.
+**Why Postgres?** The app started on SQLite for a zero-setup MVP (matches the spec's explicit
+"minimal setup" permission to deviate from its preferred MySQL/Postgres stack), then moved to
+Postgres for the Railway deployment — a real, persistent, network-accessible database rather than
+a single file on a volume. Local dev stays low-friction: `docker-compose.yml` provides a one-line
+local Postgres (`docker compose up -d`), so there's still no manual DB install. Prisma's schema/
+query API is the same across SQL databases, so this move was a two-line change
+(`server/prisma/schema.prisma`'s `datasource` block) plus a fresh migration — nothing in the route/
+service code is Postgres- or SQLite-specific, except that one JSON column (`avatarConfig`) is
+stored as a string rather than a native `Json` type (true on either database, kept as-is).
 
 **Why no password login?** Students pick a profile from a short list, like choosing a save file —
 no typing, nothing to forget. The backend still issues a real JWT and models a proper `Student`
@@ -170,9 +185,9 @@ with an `actionType`/`relatedEntityType`/`relatedEntityId`, and a **database uni
 "award this at most once" atomic — not a check-then-insert race. This was found to matter in
 practice: a find-then-create version of the same guard let two near-simultaneous requests (e.g.
 React 18 StrictMode's intentional double effect-invoke in dev) both pass the check and double-award
-XP before either insert committed; the unique constraint (SQLite, like standard SQL, treats NULL as
-distinct from NULL, so the many un-tagged transactions never collide with each other) closes that
-race regardless of cause. New reward actions, all additive (existing amounts like quest/step/focus
+XP before either insert committed; the unique constraint (Postgres, like standard SQL, treats NULL
+as distinct from NULL, so the many un-tagged transactions never collide with each other) closes
+that race regardless of cause. New reward actions, all additive (existing amounts like quest/step/focus
 completion are unchanged, to avoid re-tuning the level curve): adding a due date (+3, once per
 assignment), setting a subject (+5, once per assignment), breaking an assignment into steps (+5,
 once per assignment), finishing every step of a multi-step quest (+10 bonus on top of the normal
@@ -252,11 +267,10 @@ single shared or personal device, not a multi-tenant public login.
   school's deployment; a multi-timezone future would move "day bucket" computation to the client.
 - No automated test suite yet — verification so far is manual (see below) plus full TypeScript
   strict-mode checks on both workspaces.
-- The live Railway demo reseeds on every restart (see [Live demo](#live-demo-railway)) and has no
-  password auth — don't put real student data in it. A real deployment would drop the auto-seed
-  from `npm start`, add real authentication, and likely move off a single SQLite file on a volume
-  to Postgres (one `railway add --database postgres` plus a `DATABASE_URL` swap, no code changes
-  needed beyond the Prisma `datasource` provider).
+- The live Railway demo has no password auth — anyone with the link can create a profile and use
+  it. Data now persists properly across restarts (see [Live demo](#live-demo-railway)), so this
+  matters more than it did on the old reseed-every-restart SQLite setup; a real deployment would
+  add real authentication before accepting genuine student data.
 - The recommendation engine's scoring weights are hand-picked heuristics, not tuned against real
   usage data — reasonable starting points, documented inline in `lib/recommend.ts`, expected to need
   adjustment once real students use it.
