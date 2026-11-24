@@ -280,6 +280,13 @@ single shared or personal device, not a multi-tenant public login.
 
 ## Verification performed
 
+- **Postgres migration**: ran the full `prisma migrate deploy` → `seed` → server-boot flow against
+  a real local Postgres (Docker), confirmed `/api/me`, `/api/recommendations/next`, and
+  `/api/me/progress` all work unchanged; deployed to Railway and confirmed the live health check,
+  profile list, migration, and first-boot seed all succeeded against the managed Postgres service;
+  then restarted the live service and confirmed the same student ID/XP persisted (`seed:if-empty`
+  correctly skipped on the second boot) — the exact behavior the old SQLite-on-a-volume setup
+  didn't have.
 - `npm run typecheck` (both workspaces) and `npm run build` (both workspaces) pass clean.
 - Manually exercised in a real browser against the live API: profile creation/login, quick-add with
   every field combination, step breakdown + suggest-steps, completing quests/steps/focus
